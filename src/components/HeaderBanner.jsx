@@ -244,7 +244,7 @@ export default function HeaderBanner() {
                 className="flex items-center justify-center gap-2 w-full px-6 py-3 rounded-xl text-[13.5px] font-semibold cursor-pointer"
                 style={{ backgroundColor: accent, color: isDark ? "#0b0b0e" : "#ffffff" }}
               >
-                Start a Project
+                Start a Project 
                 <ArrowUpRight size={14} />
               </motion.span>
             </Link>

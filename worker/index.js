@@ -215,53 +215,132 @@ async function handleDraftReply(request, env) {
   return jsonResponse({ draft: result.draft });
 }
 
-/* ── Gmail send (server-side, OAuth2 refresh-token flow) ──────────────────
-   Requires 4 Cloudflare Worker secrets: GMAIL_CLIENT_ID, GMAIL_CLIENT_SECRET,
-   GMAIL_REFRESH_TOKEN, GMAIL_SENDER_EMAIL. Access tokens expire in ~1hr, so
-   every send re-exchanges the long-lived refresh token — simplest correct
-   option at this volume, no caching needed. */
-async function getGmailAccessToken(env) {
-  const res = await fetch("https://oauth2.googleapis.com/token", {
+/* ── Email send via Resend ─────────────────────────────────────────────────
+   Requires 2 Cloudflare Worker secrets: RESEND_API_KEY, RESEND_FROM_EMAIL
+   e.g. RESEND_FROM_EMAIL = "Webaurix <info@webaurix.com>"
+   Domain must be verified in resend.com dashboard. */
+function buildEmailHtml(toName, bodyText) {
+  const firstName = (toName || "there").split(" ")[0];
+  const paragraphs = bodyText
+    .replace(/^Dear\s+[^\n,]+[,.]?\s*/i, "")
+    .replace(/Webaurix\s*Team\s*$/i, "")
+    .trim()
+    .split(/\n+/)
+    .filter(Boolean)
+    .map(p => `<p class="body-text">${p}</p>`)
+    .join("");
+
+  return `<!DOCTYPE html>
+<html lang="en" xmlns="http://www.w3.org/1999/xhtml">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta http-equiv="X-UA-Compatible" content="IE=edge">
+  <title>Webaurix</title>
+  <style>
+    body { margin:0; padding:0; background:#f1f5f9; font-family:'Segoe UI',Helvetica,Arial,sans-serif; -webkit-text-size-adjust:100%; }
+    table { border-collapse:collapse; }
+    img { border:0; display:block; max-width:100%; }
+    .wrapper { width:100%; background:#f1f5f9; padding:32px 16px; }
+    .container { max-width:580px; margin:0 auto; width:100%; }
+    .header { background:#0b0b0e; background:linear-gradient(135deg,#0b0b0e 0%,#0d1017 60%,#0b1215 100%); border-radius:16px 16px 0 0; padding:28px 40px; text-align:center; border-bottom:2px solid #0e7490; }
+    .logo-row { display:flex; align-items:center; justify-content:center; gap:10px; }
+    .logo-icon { height:38px; width:auto; }
+    .logo-img { height:32px; width:auto; }
+    .tagline { margin:10px 0 0; color:#64748b; font-size:11px; letter-spacing:2px; text-transform:uppercase; text-align:left; }
+    .body-wrap { background:#ffffff; padding:36px 40px 28px; }
+    .greeting { margin:0 0 20px; font-size:17px; font-weight:700; color:#0f172a; }
+    .body-text { margin:0 0 15px; color:#374151; font-size:15px; line-height:1.75; }
+    .cta-wrap { margin:28px 0; }
+    .cta-btn { display:inline-block; background:#0e7490; color:#ffffff !important; font-size:14px; font-weight:600; text-decoration:none; padding:13px 26px; border-radius:8px; letter-spacing:0.3px; }
+    .reply-note { margin:4px 0 0; color:#64748b; font-size:13px; line-height:1.6; }
+    .divider { border:none; border-top:1px solid #e2e8f0; margin:0; }
+    .sig-wrap { background:#ffffff; padding:20px 40px 28px; }
+    .sig-name { margin:0; font-size:14px; font-weight:700; color:#0f172a; }
+    .sig-meta { margin:4px 0 0; font-size:13px; color:#64748b; }
+    .footer { background:#0b0b0e; background:linear-gradient(135deg,#0b0b0e 0%,#0d1017 60%,#0b1215 100%); border-radius:0 0 16px 16px; padding:18px 40px; text-align:center; border-top:2px solid #0e7490; }
+    .footer p { margin:0; color:#475569; font-size:12px; }
+    .footer a { color:#68b5cc; text-decoration:none; }
+
+    @media only screen and (max-width:600px) {
+      .wrapper { padding:16px 8px !important; }
+      .header { padding:24px 20px !important; border-radius:12px 12px 0 0 !important; }
+      .logo-img { height:34px !important; }
+      .body-wrap { padding:24px 20px 20px !important; }
+      .greeting { font-size:16px !important; }
+      .body-text { font-size:14px !important; }
+      .cta-btn { display:block !important; text-align:center !important; padding:14px 20px !important; }
+      .sig-wrap { padding:16px 20px 20px !important; }
+      .footer { padding:16px 20px !important; border-radius:0 0 12px 12px !important; }
+    }
+  </style>
+</head>
+<body>
+<div class="wrapper">
+  <div class="container">
+
+    <!-- Header -->
+    <div class="header">
+      <div class="logo-row">
+        <img src="https://webaurix.com/logo-icon.png" alt="" class="logo-icon">
+        <img src="https://webaurix.com/logo-light.png" alt="Webaurix" class="logo-img">
+      </div>
+      <p class="tagline">AURA THAT REDEFINED TECH</p>
+    </div>
+
+    <!-- Body -->
+    <div class="body-wrap">
+      <p class="greeting">Hi ${firstName},</p>
+      ${paragraphs}
+      <div class="cta-wrap">
+        <a href="https://calendly.com/info-webaurix/30min" class="cta-btn">Book a Free Consultation &rarr;</a>
+      </div>
+      <p class="reply-note">Feel free to reply to this email — we typically respond within a few hours.</p>
+    </div>
+
+    <!-- Divider -->
+    <div style="background:#ffffff;padding:0 40px;"><hr class="divider"></div>
+
+    <!-- Signature -->
+    <div class="sig-wrap">
+      <p class="sig-name">Webaurix Team</p>
+      <p class="sig-meta">support@webaurix.com &nbsp;&middot;&nbsp; webaurix.com</p>
+      <p class="sig-meta">Lahore, Pakistan</p>
+    </div>
+
+    <!-- Footer -->
+    <div class="footer">
+      <p>&copy; 2025 Webaurix &nbsp;&middot;&nbsp; <a href="https://webaurix.com">webaurix.com</a></p>
+    </div>
+
+  </div>
+</div>
+</body>
+</html>`;
+}
+
+async function sendEmail(env, { to, toName, subject, body }) {
+  if (!env.RESEND_API_KEY) throw new Error("RESEND_API_KEY secret not configured in Cloudflare");
+  const from = env.RESEND_FROM_EMAIL || "Webaurix <support@webaurix.com>";
+  const toArr = toName ? [`${toName} <${to}>`] : [to];
+
+  const res = await fetch("https://api.resend.com/emails", {
     method: "POST",
-    headers: { "Content-Type": "application/x-www-form-urlencoded" },
-    body: new URLSearchParams({
-      client_id: env.GMAIL_CLIENT_ID,
-      client_secret: env.GMAIL_CLIENT_SECRET,
-      refresh_token: env.GMAIL_REFRESH_TOKEN,
-      grant_type: "refresh_token",
+    headers: {
+      "Authorization": `Bearer ${env.RESEND_API_KEY}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      from,
+      to: toArr,
+      subject,
+      text: body,
+      html: buildEmailHtml(toName, body),
     }),
   });
-  if (!res.ok) throw new Error("Gmail token refresh failed");
-  const data = await res.json();
-  return data.access_token;
-}
 
-function base64url(str) {
-  const bytes = new TextEncoder().encode(str);
-  let binary = "";
-  bytes.forEach((b) => { binary += String.fromCharCode(b); });
-  return btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
-}
-
-async function sendGmail(env, { to, toName, subject, body }) {
-  const accessToken = await getGmailAccessToken(env);
-  const from = env.GMAIL_SENDER_EMAIL;
-  const toHeader = toName ? `"${toName.replace(/"/g, "")}" <${to}>` : to;
-  const mime = [
-    `From: Webaurix <${from}>`,
-    `To: ${toHeader}`,
-    `Subject: ${subject}`,
-    `Content-Type: text/plain; charset="UTF-8"`,
-    "",
-    body,
-  ].join("\r\n");
-
-  const res = await fetch("https://gmail.googleapis.com/gmail/v1/users/me/messages/send", {
-    method: "POST",
-    headers: { Authorization: `Bearer ${accessToken}`, "Content-Type": "application/json" },
-    body: JSON.stringify({ raw: base64url(mime) }),
-  });
-  if (!res.ok) throw new Error("Gmail send failed");
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.message || data.name || `Resend error ${res.status}`);
   return true;
 }
 
@@ -281,7 +360,7 @@ async function handleAutoReply(request, env) {
 
   let sent = false;
   try {
-    await sendGmail(env, { to: result.email, toName: result.name, subject: "Re: Your inquiry with Webaurix", body: result.draft });
+    await sendEmail(env, { to: result.email, toName: result.name, subject: "Re: Your inquiry with Webaurix", body: result.draft });
     sent = true;
   } catch {
     sent = false;
@@ -298,9 +377,7 @@ async function handleSendReply(request, env) {
   if (!admin) return jsonResponse({ error: "Unauthorized" }, 401);
 
   let body;
-  try {
-    body = await request.json();
-  } catch {
+  try { body = await request.json(); } catch {
     return jsonResponse({ error: "Invalid JSON body" }, 400);
   }
 
@@ -311,9 +388,9 @@ async function handleSendReply(request, env) {
   if (!to || !text) return jsonResponse({ error: "Missing required fields" }, 400);
 
   try {
-    await sendGmail(env, { to, toName, subject, body: text });
-  } catch {
-    return jsonResponse({ error: "Gmail send failed" }, 502);
+    await sendEmail(env, { to, toName, subject, body: text });
+  } catch (err) {
+    return jsonResponse({ error: String(err?.message || "Gmail send failed") }, 502);
   }
 
   return jsonResponse({ sent: true });
@@ -322,6 +399,12 @@ async function handleSendReply(request, env) {
 export default {
   async fetch(request, env) {
     const url = new URL(request.url);
+
+    // 1. If browser sent a trailing-slash URL, 301 → canonical (no slash)
+    if (url.pathname !== "/" && url.pathname.endsWith("/")) {
+      url.pathname = url.pathname.slice(0, -1);
+      return Response.redirect(url.toString(), 301);
+    }
 
     if (url.pathname === "/api/ai-manager/chat" && request.method === "POST") {
       return handleChat(request, env);

@@ -243,9 +243,15 @@ const injectRouteMeta = () => ({
         .replace(/(<meta name="twitter:title" content=")[^"]*(")/,       `$1${safeTitle}$2`)
         .replace(/(<meta name="twitter:description" content=")[^"]*(")/,  `$1${safeDesc}$2`)
 
-      const outDir = path.join(distDir, ...route.path.replace(/^\//, '').split('/'))
+      // Write as `segment.html` (not `segment/index.html`) so Cloudflare
+      // serves it directly for /segment without a trailing-slash redirect.
+      const segments = route.path.replace(/^\//, '').split('/')
+      const filename = segments.pop()
+      const outDir = segments.length > 0
+        ? path.join(distDir, ...segments)
+        : distDir
       fs.mkdirSync(outDir, { recursive: true })
-      fs.writeFileSync(path.join(outDir, 'index.html'), html, 'utf-8')
+      fs.writeFileSync(path.join(outDir, `${filename}.html`), html, 'utf-8')
     }
   },
 })

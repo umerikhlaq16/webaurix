@@ -1977,13 +1977,16 @@ const AIDraftPanel = ({ row, collectionName, contactName, contactEmail, contactP
         headers: { "Content-Type": "application/json", Authorization: `Bearer ${idToken}` },
         body: JSON.stringify({ to: contactEmail, toName: contactName, body: draftText }),
       });
-      if (!res.ok) throw new Error("failed");
+      if (!res.ok) {
+        const d = await res.json().catch(() => ({}));
+        throw new Error(d.error || `Server error ${res.status}`);
+      }
       await updateDoc(doc(db, collectionName, row.id), { aiDraft: draftText, aiDraftStatus: "sent", aiDraftSentAt: serverTimestamp() });
       setStatus("sent");
       setSentAt(new Date());
       onUpdated({ aiDraft: draftText, aiDraftStatus: "sent" });
-    } catch {
-      setErr("Email failed to send — check the Gmail secrets are configured in Cloudflare.");
+    } catch (e) {
+      setErr(e?.message || "Email failed to send.");
     } finally {
       setSending(false);
     }
